@@ -1,0 +1,102 @@
+# AIWA V2 Docker Compose 配置 - 生产级部署
+# Flask Web + MCP Server + Playwright 自动化测试
+#
+# 使用方法:
+#   构建: docker-compose build
+#   启动: docker-compose up -d
+#   停止: docker-compose down
+#   日志: docker-compose logs -f aiwa-v2-web
+#   重启: docker-compose restart
+#
+# 端口映射: 5002 (Web API)
+
+version: '3.8'
+
+services:
+  # ============================================================
+  # AIWA V2 Web 服务
+  # ============================================================
+  aiwa-v2-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - PYTHON_VERSION=3.11
+    image: aiwa-v2:latest
+    container_name: aiwa-v2-web
+    restart: unless-stopped
+    
+    # 端口映射
+    ports:
+      - "${V2_PORT:-5002}:5002"
+    
+    # 环境变量
+    environment:
+      - EXECUTION_MODE=${EXECUTION_MODE:-local}
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app:/app/MCP_Server:/app/MCP_Server/lib
+      - PORT=5002
+      - HOST=0.0.0.0
+      - FLASK_ENV=production
+      - FLASK_DEBUG=0
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+      # LLM 配置 (从 .env 读取)
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_API_BASE_URL=${LLM_API_BASE_URL}
+      - LLM_MODEL_NAME=${LLM_MODEL_NAME:-qwen-plus}
+    
+    # 从 .env 文件加载环境变量
+    env_file:
+      - ../.env
+    
+    # 数据卷挂载 (持久化)
+    volumes:
+      # 上传文件
+      - ../Agent_Test/data/uploads:/app/Agent_Test/data/uploads
+      # 测试报告
+      - ../Agent_Test/data/reports:/app/Agent_Test/data/reports
+      # 日志文件
+      - ../Agent_Test/data/logs:/app/Agent_Test/data/logs
+      # V2 数据目录
+      - ./data/logs:/app/data/logs
+      # Playwright 单人测试报告
+      - ./MCP_Server/lib/PlayWright/solo_worker_PlayWright/reports:/app/MCP_Server/lib/PlayWright/solo_worker_PlayWright/reports
+      # Playwright 并发测试报告
+      - ./MCP_Server/lib/PlayWright/max_worker/reports:/app/MCP_Server/lib/PlayWright/max_worker/reports
+    
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5002/api/mode"]
+      interval: 60s
+      timeout: 15s
+      retries: 5
+      start_period: 90s
+    
+    # 资源限制 (Playwright 需要较多资源)
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+    
+    # 网络配置
+    networks:
+      - aiwa-v2-network
+    
+    # 日志配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+# ============================================================
+# 网络配置
+# ============================================================
+networks:
+  aiwa-v2-network:
+    driver: bridge
+    name: aiwa-v2-net
